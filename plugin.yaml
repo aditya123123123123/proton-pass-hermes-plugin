@@ -1,0 +1,40 @@
+name: proton-pass
+version: 0.2.0
+description: Allowlisted Proton Pass login autofill through Hermes Browser Vault
+requires_hermes: ">=0.21.6"
+kind: standalone
+requires_env:
+  - name: PROTON_PASS_PERSONAL_ACCESS_TOKEN
+    description: Proton Pass personal access token used only for ephemeral CLI logins
+    secret: true
+provides_hooks: []
+config_schema:
+  connection_file:
+    type: str
+    description: Hermes-profile-relative JSON file containing the Proton Pass CLI path
+    default: proton-pass/connection.json
+  binary_path:
+    type: str
+    description: Optional absolute path to pass-cli
+  allowed_vault_names:
+    type: list
+    description: Vault names eligible for autofill
+  allowlisted_items:
+    type: list
+    description: Exact Proton Pass share_id and item_id pairs eligible for autofill
+  enabled:
+    type: bool
+    description: Enable Proton Pass autofill
+    default: false
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env:
+    - PROTON_PASS_PERSONAL_ACCESS_TOKEN
+
+# Security disclosure: shells out to a user-installed pass-cli binary and reads only the
+# configured Hermes-profile connection metadata. The token is read through Hermes's
+# profile-scoped secret API, passed to a one-operation temporary session, and never read
+# from Keychain, vendor session files, browser profiles, or .env files by this plugin.
+# Autofill is restricted to explicitly allowlisted Proton Pass item IDs and exact origins.
