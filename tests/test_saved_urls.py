@@ -63,7 +63,7 @@ def test_invalid_or_ambiguous_input_fails_closed(raw):
 @pytest.fixture
 def backend(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(pp, "_handle_key", lambda: b"synthetic-key-not-a-real-credential")
+    monkeypatch.setattr(pp, "_handle_key", lambda: b"[REDACTED]")
     b = pp.ProtonPassLoginBackend({"allowed_vault_names": [], "allowlisted_items": [{"share_id": "share", "item_id": "item"}]})
     item = {"id": "item", "share_id": "share", "item_type": "login", "state": "active", "title": "Synthetic"}
     monkeypatch.setattr(b, "_connection", lambda: {})
@@ -74,7 +74,7 @@ def backend(monkeypatch, tmp_path):
     def field(conn, share_id, item_id, field, **kw):
         b.test_fields.append(field)
         assert (share_id, item_id) == ("share", "item")
-        return {"urls": b.test_urls, "username": "synthetic@example.com", "password": "SYNTHETIC_ONLY_SENTINEL"}[field]
+        return {"urls": b.test_urls, "username": "synthetic@example.com", "password": "[REDACTED]"}[field]
 
     monkeypatch.setattr(b, "_item_field", field)
     return b
@@ -87,7 +87,7 @@ def test_multi_origin_handles_revalidate_and_do_not_resolve_for_metadata(backend
     assert all(not m.allowed_origins for m in metas)
     assert all(backend.get_meta(m.id) == m for m in metas)
     assert "password" not in backend.test_fields
-    assert backend.resolve_password(metas[0].id) == "SYNTHETIC_ONLY_SENTINEL"
+    assert backend.resolve_password(metas[0].id) == "[REDACTED]"
 
 
 def test_removed_origin_and_malformed_saved_urls_revoke_old_handles(backend):
@@ -107,13 +107,13 @@ def test_protected_fill_refuses_nonmatching_origin_before_secret(backend, monkey
     import tools.browser_vault_tool as vault
     meta = backend.list_items()[0]
     monkeypatch.setattr(backends, "backend_for_handle", lambda handle: backend)
-    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *args: None)
+    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *args, origin_match: None)
     monkeypatch.setattr(vault, "_current_page_origin", lambda *args: page)
     monkeypatch.setattr(vault, "_eval_js", lambda *args: pytest.fail("must not inspect or fill"))
     result = json.loads(vault.browser_vault_fill(meta.id, task_id="synthetic"))
     assert result["error_type"] == "origin_mismatch"
     assert "password" not in backend.test_fields
-    assert "SYNTHETIC_ONLY_SENTINEL" not in json.dumps(result)
+    assert "[REDACTED]" not in json.dumps(result)
 
 
 @pytest.mark.parametrize("which", [0, 1])
@@ -123,14 +123,14 @@ def test_protected_synthetic_fill_keeps_secret_channel_and_atomic_guard(backend,
     import tools.browser_vault_tool as vault
     meta = backend.list_items()[which]
     monkeypatch.setattr(backends, "backend_for_handle", lambda handle: backend)
-    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *args: meta.origin)
+    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *args, origin_match: meta.origin)
     controls = [{"autocomplete": "current-password", "formIndex": 0, "index": 0,
                  "label": "", "name": "pw", "type": "password"}]
     monkeypatch.setattr(vault, "_eval_js", lambda *args: {"success": True, "result": json.dumps(controls)})
     secret_calls = []
 
     def secret_eval(task, expression):
-        assert "SYNTHETIC_ONLY_SENTINEL" in expression
+        assert "[REDACTED]" in expression
         assert "window.location.origin" in expression
         assert json.dumps(meta.origin) in expression
         secret_calls.append(True)
@@ -148,7 +148,7 @@ def test_protected_synthetic_fill_keeps_secret_channel_and_atomic_guard(backend,
         assert result["origin"] == meta.origin
     assert secret_calls == [True]
     captured = capsys.readouterr()
-    assert "SYNTHETIC_ONLY_SENTINEL" not in json.dumps(result) + captured.out + captured.err + caplog.text
+    assert "[REDACTED]" not in json.dumps(result) + captured.out + captured.err + caplog.text
 
 
 def test_signed_malformed_origin_fails_before_provider_lookup(backend, monkeypatch):

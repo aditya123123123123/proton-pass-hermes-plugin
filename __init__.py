@@ -60,13 +60,23 @@ class ProtonPassLoginBackend(LoginBackend):
     enabled_by_default = False
 
     def __init__(self, cfg: Optional[Dict[str, Any]] = None):
-        self.cfg = cfg or {}
-        self._allowlisted_items = _parse_allowlisted_items(self.cfg.get("allowlisted_items", None))
+        self.cfg = cfg if cfg is not None else {}
+        _parse_allowlisted_items(self.cfg.get("allowlisted_items"))
+
+    @property
+    def _allowlisted_items(self) -> Optional[set[tuple[str, str]]]:
+        # Re-read policy: a retained instance must not keep revoked item grants.
+        return _parse_allowlisted_items(self.cfg.get("allowlisted_items"))
+
+    def _has_scope(self) -> bool:
+        items = self._allowlisted_items
+        return items != set() and bool(items or self._allowed_vault_names())
 
     @classmethod
-    def is_installed(cls, cfg: Optional[Dict[str, Any]] = None) -> bool:
+    def is_available(cls, config: Dict[str, Any]) -> bool:
+        """Core availability contract: local prerequisites only, never authenticate."""
         try:
-            cfg = cfg or {}
+            cfg = config or {}
             conn = _connection_file_from_cfg(cfg)
             if not conn.is_file():
                 return False
@@ -78,11 +88,16 @@ class ProtonPassLoginBackend(LoginBackend):
         except Exception:
             return False
 
+    @classmethod
+    def is_installed(cls, cfg: Optional[Dict[str, Any]] = None) -> bool:
+        """Compatibility alias for callers of the original standalone API."""
+        return cls.is_available(cfg or {})
+
     def owns(self, handle: str) -> bool:
         return handle.startswith(self.prefix)
 
     def list_items(self) -> List[VaultItemMeta]:
-        if self._allowlisted_items == set():
+        if not self._has_scope():
             return []
         conn = self._connection()
         out: List[VaultItemMeta] = []
@@ -103,10 +118,21 @@ class ProtonPassLoginBackend(LoginBackend):
         return out
 
     def get_meta(self, handle: str) -> Optional[VaultItemMeta]:
-        if self._allowlisted_items == set():
+        if not self._has_scope():
             return None
         payload = self._decode_handle(handle)
         if payload is None:
+            return None
+        # A signature proves integrity, not continued authorization. Reject revoked
+        # handles before connection loading, metadata listing or provider calls.
+        vault_name = str(payload.get("vault_name") or "")
+        if not self._item_allowed({"id": payload["item_id"], "share_id": payload["share_id"]}):
+            return None
+        vault_names = self._allowed_vault_names()
+        if vault_name:
+            if vault_name not in vault_names:
+                return None
+        elif vault_names or not self._allowlisted_items:
             return None
         conn = self._connection()
         item = self._listed_active_item(conn, str(payload.get("vault_name") or ""), str(payload.get("share_id") or ""), str(payload.get("item_id") or ""))
@@ -116,6 +142,8 @@ class ProtonPassLoginBackend(LoginBackend):
         return next((m for m in metas if m.origin == payload.get("origin") and m.id == handle), None)
 
     def resolve_password(self, handle: str) -> str:
+        if not self._has_scope():
+            return ""
         payload = self._decode_handle(handle)
         if payload is None:
             return ""
@@ -149,12 +177,14 @@ class ProtonPassLoginBackend(LoginBackend):
 
     def _allowed_vault_names(self) -> List[str]:
         raw = self.cfg.get("allowed_vault_names")
-        if isinstance(raw, list):
-            names = [str(v).strip() for v in raw if str(v).strip()]
-            return names
-        else:
-            names = []
-        return names or ["Hermes Access"]
+        if raw is None:
+            return []
+        if not isinstance(raw, list) or any(
+            not isinstance(name, str) or not name or name != name.strip()
+            or any(not char.isprintable() for char in name) for name in raw
+        ):
+            raise ValueError("vault.protonpass.allowed_vault_names must be a list of non-empty vault names")
+        return raw
 
     def _metadata_for_item(self, conn: dict[str, Any], vault_name: str, item: dict[str, Any]) -> List[VaultItemMeta]:
         item_id = item.get("id")

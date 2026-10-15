@@ -1,7 +1,8 @@
 name: proton-pass
-version: 0.2.0
+version: 0.2.1
 description: Allowlisted Proton Pass login autofill through Hermes Browser Vault
-requires_hermes: ">=0.21.6"
+# Requires the unreleased login-backend API in core PR #119863; see README.
+# No released Hermes version floor is claimed until that API ships.
 kind: standalone
 requires_env:
   - name: PROTON_PASS_PERSONAL_ACCESS_TOKEN
@@ -18,7 +19,7 @@ config_schema:
     description: Optional absolute path to pass-cli
   allowed_vault_names:
     type: list
-    description: Vault names eligible for autofill
+    description: Explicit vault-wide opt-in; omitted or empty grants no vault access
   allowlisted_items:
     type: list
     description: Exact Proton Pass share_id and item_id pairs eligible for autofill
@@ -26,12 +27,9 @@ config_schema:
     type: bool
     description: Enable Proton Pass autofill
     default: false
-capabilities:
-  provides_tools: []
-  provides_hooks: []
-  provides_middleware: []
-  requires_env:
-    - PROTON_PASS_PERSONAL_ACCESS_TOKEN
+provides_tools: []
+provides_middleware: []
+capabilities: []
 
 # Security disclosure: shells out to a user-installed pass-cli binary and reads only the
 # configured Hermes-profile connection metadata. The token is read through Hermes's

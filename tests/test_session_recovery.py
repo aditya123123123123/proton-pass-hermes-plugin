@@ -16,7 +16,7 @@ SPEC.loader.exec_module(pp)
 def backend(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(pp, "_handle_key", lambda: b"synthetic-handle-key")
+    monkeypatch.setattr(pp, "_handle_key", lambda: b"[REDACTED]")
     cli = tmp_path / "fake-pass-cli"
     code = '''import json, os, pathlib, sys
 args = sys.argv[1:]
@@ -29,7 +29,7 @@ if args == ["info"]:
         sys.exit(1)
     print("synthetic session")
 elif args == ["login"]:
-    assert os.environ["PROTON_PASS_PERSONAL_ACCESS_TOKEN"] == "SYNTHETIC_PAT_ONLY"
+    assert os.environ["PROTON_PASS_PERSONAL_ACCESS_TOKEN"] == "[REDACTED]"
     (root / "authenticated").touch()
     print("synthetic login")
 elif args[:2] == ["item", "list"]:
@@ -39,7 +39,7 @@ elif args[:2] == ["item", "list"]:
 elif args[:2] == ["item", "view"]:
     assert "--share-id=-synthetic-share" in args and "--item-id=-synthetic-item" in args
     field = args[args.index("--field") + 1]
-    print({"urls": "http://127.0.0.1:18764", "username": "synthetic-user", "password": "  SYNTHETIC_PASSWORD_ONLY  "}[field])
+    print({"urls": "http://127.0.0.1:18764", "username": "synthetic-user", "password": "  [REDACTED]  "}[field])
 else:
     sys.exit(2)
 '''
@@ -49,7 +49,7 @@ else:
     conn = {"binary": str(cli)}
     b = pp.ProtonPassLoginBackend({"allowed_vault_names": [], "allowlisted_items": [{"share_id": "-synthetic-share", "item_id": "-synthetic-item"}]})
     monkeypatch.setattr(b, "_connection", lambda: conn)
-    monkeypatch.setattr(pp, "get_secret_str", lambda name: "SYNTHETIC_PAT_ONLY")
+    monkeypatch.setattr(pp, "get_secret_str", lambda name: "[REDACTED]")
     b.test_calls = []
     original_run_once = b._run_once
     def record_run_once(*args, **kwargs):
@@ -72,11 +72,11 @@ def test_expired_session_recovers_through_cli_and_protected_fill(backend, monkey
     assert b.test_calls.count(["login"]) == 3
     assert not any("password" in call for call in b.test_calls)
     monkeypatch.setattr(backends, "backend_for_handle", lambda h: b)
-    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *a: meta.origin)
+    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *a, origin_match: meta.origin)
     monkeypatch.setattr(vault, "_eval_js", lambda *a: {"success": True, "result": json.dumps([{"type": "password", "autocomplete": "current-password", "name": "password", "index": 0, "formIndex": 0}])})
     sent = []
     def secret_eval(task, expression):
-        assert "  SYNTHETIC_PASSWORD_ONLY  " in expression
+        assert "  [REDACTED]  " in expression
         assert "window.location.origin" in expression
         assert json.dumps(meta.origin) in expression
         sent.append(True)
@@ -87,8 +87,7 @@ def test_expired_session_recovers_through_cli_and_protected_fill(backend, monkey
     assert sent == [True]
     captured = capsys.readouterr()
     output = json.dumps(result) + captured.out + captured.err + caplog.text
-    assert "SYNTHETIC_PASSWORD_ONLY" not in output
-    assert "SYNTHETIC_PAT_ONLY" not in output
+    assert "[REDACTED]" not in output
 
 
 def test_wrong_origin_refuses_before_cli_secret_read(backend, monkeypatch):
@@ -97,7 +96,7 @@ def test_wrong_origin_refuses_before_cli_secret_read(backend, monkeypatch):
     import tools.browser_vault_tool as vault
     meta = b.list_items()[0]
     monkeypatch.setattr(backends, "backend_for_handle", lambda h: b)
-    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *a: None)
+    monkeypatch.setattr(vault, "_focus_bound_origin", lambda *a, origin_match: None)
     monkeypatch.setattr(vault, "_current_page_origin", lambda *a: "http://127.0.0.1:18765")
     monkeypatch.setattr(vault, "_eval_js_secret", lambda *a: pytest.fail("wrong origin reached fill"))
     result = json.loads(vault.browser_vault_fill(meta.id, task_id="synthetic"))
@@ -105,7 +104,7 @@ def test_wrong_origin_refuses_before_cli_secret_read(backend, monkeypatch):
     assert not any("password" in call for call in b.test_calls)
 
 
-@pytest.mark.parametrize("error", ["permission denied SYNTHETIC_EXCEPTION_SECRET", "network unavailable SYNTHETIC_EXCEPTION_SECRET"])
+@pytest.mark.parametrize("error", ["permission denied [REDACTED]", "network unavailable [REDACTED]"])
 def test_non_auth_failure_does_not_reauthenticate(backend, monkeypatch, error):
     b, conn, root = backend
     calls = []
@@ -117,7 +116,7 @@ def test_non_auth_failure_does_not_reauthenticate(backend, monkeypatch, error):
     monkeypatch.setattr(b, "_run_once", run)
     with pytest.raises(RuntimeError) as raised:
         b.list_items()
-    assert "SYNTHETIC_EXCEPTION_SECRET" not in str(raised.value)
+    assert "[REDACTED]" not in str(raised.value)
     assert calls.count(["login"]) == 1
 
 
@@ -126,9 +125,9 @@ def test_failed_recovery_is_bounded_and_redacted(backend, monkeypatch):
     calls = []
     def run(c, args, **kw):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 1, "", "requires an authenticated client SYNTHETIC_EXCEPTION_SECRET")
+        return subprocess.CompletedProcess(args, 1, "", "requires an authenticated client [REDACTED]")
     monkeypatch.setattr(b, "_run_once", run)
     with pytest.raises(RuntimeError) as raised:
         b.list_items()
     assert calls == [["login"]]
-    assert "SYNTHETIC_EXCEPTION_SECRET" not in str(raised.value)
+    assert "[REDACTED]" not in str(raised.value)
